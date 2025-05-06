@@ -62,6 +62,15 @@ fun calculerSoldeCompte(database: Database, compteId: Int): Double {
     }
 }
 
+fun getNumeroCompte(database: Database, compteId: Int): String {
+    return database
+        .from(Comptes)
+        .select(Comptes.NumeroCompte)
+        .where { Comptes.IdCompte eq compteId }
+        .map { it[Comptes.NumeroCompte] }
+        .firstOrNull() ?: "Numéro inconnu"
+}
+
 fun fetchComptes(database: Database, userId: Int):List<ComptesEntity> {
     val compte = database
         .from(Comptes)
@@ -78,119 +87,6 @@ fun fetchComptes(database: Database, userId: Int):List<ComptesEntity> {
         }
     return compte
 }
-
-@Composable
-fun ComptesTable(
-    database: Database,
-    userId: Int,
-    refreshKey: Int = 0,
-    onNavigateToCompte: (Int) -> Unit,
-    onEditCompte: (Int) -> Unit = {},
-    onDeleteCompte: (Int) -> Unit = {},
-    onSoldeClick:(Int) -> Unit = {}
-) {
-    // Utilisez remember avec refreshKey pour forcer l'actualisation
-    val fullData = remember(refreshKey) { fetchComptesData(database, userId) }
-    val originalRows = fullData.second
-
-    // Conserver les ID des comptes pour les actions, mais ne pas les afficher
-    val accountIds = originalRows.map { it[0]?.toIntOrNull() ?: -1 }
-
-    // Colonnes visibles (sans l'ID)
-    val visibleColumns = listOf("Numéro de compte", "Établissement", "Solde", "Type")
-
-    // Créer des lignes sans la colonne ID
-    val visibleRows = originalRows.map { row -> row.drop(1) }
-
-    val soldeColors = originalRows.map { row ->
-        val soldeStr = row[3] ?: "0,00 €"
-        // Extraire le nombre du solde formaté pour déterminer sa couleur
-        val soldeVal = try {
-            // Vérifier d'abord si la chaîne contient un signe négatif
-            val isNegative = soldeStr.contains("-")
-
-            // Supprimer tous les caractères non numériques sauf la virgule/point
-            var cleaned = soldeStr.filter { char ->
-                char.isDigit() || char == ',' || char == '.'
-            }
-
-            // Remplacer la virgule par un point pour le format décimal
-            cleaned = cleaned.replace(',', '.')
-
-            // Ajouter le signe négatif si nécessaire
-            val numericStr = if (isNegative) "-$cleaned" else cleaned
-
-            // Convertir en nombre
-            val value = numericStr.toDoubleOrNull() ?: 0.0
-            println("Solde '$soldeStr' converti en $value")
-            value
-        } catch (e: Exception) {
-            println("Erreur lors de la conversion du solde '$soldeStr': ${e.message}")
-            0.0
-        }
-
-        // La couleur est verte si le solde est positif ou nul, rouge s'il est négatif
-        if (soldeVal >= 0) Color(0xFF1dbc7c) else Color(0xFFb61431)
-    }
-
-    DynamicTable(
-        columns = visibleColumns,
-        rows = visibleRows,
-        sortableColumns = setOf(0,1,2,3,4),
-        isClickable = { rowIndex, colIndex -> colIndex == 0}, // Rendre la première colonne cliquable
-        onCellClick = { rowIndex, colIndex ->
-            // Récupérer l'ID du compte à partir de la ligne cliquée
-            val accountId = accountIds[rowIndex]
-            if (accountId != -1) {
-                if (colIndex == 0) {
-                    // Clic sur le numéro de compte - navigation vers la page détaillée
-                    println("Navigating to account ID: $accountId")
-                    onNavigateToCompte(accountId)
-                } else if (colIndex == 2) {
-                    // Clic sur le solde - affichage du graphique
-                    println("Showing chart for account ID: $accountId")
-                    onSoldeClick(accountId)
-                }
-            } else {
-                println("Failed to retrieve account ID")
-            }
-        },
-        columnWidths = listOf(0.1f, 0.3f, 0.25f,0.2f, 0.2f), // ID, Numéro, Établissement, Type
-        customCellAlignment = { colIndex ->
-            when (colIndex) {
-                0 -> Alignment.Center // ID
-                else -> Alignment.CenterStart
-            }
-        },
-        customCellColorsByValue = { value, colIndex ->
-            when (colIndex) {
-                2 -> { // Colonne "Solde"
-                    // Détecter directement si le solde est négatif
-                    if (value.contains("-")) {
-                        Color(0xFFb61431) // Rouge pour solde négatif
-                    } else {
-                        Color(0xFF1dbc7c) // Vert pour solde positif ou nul
-                    }
-                }
-                else -> null
-            }
-        },
-        showEditDeleteActions = true,
-        onEditRow = { rowIndex ->
-            val accountId = accountIds[rowIndex]
-            if (accountId != -1) {
-                onEditCompte(accountId)
-            }
-        },
-        onDeleteRow = { rowIndex ->
-            val accountId = accountIds[rowIndex]
-            if (accountId != -1) {
-                onDeleteCompte(accountId)
-            }
-        }
-    )
-}
-
 
 fun onNavigateToCompte(router: Router, accountId: Int) {
     println("Setting account ID to: $accountId")

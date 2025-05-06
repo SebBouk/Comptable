@@ -1,7 +1,8 @@
 package org.example.comptable.ui.components
 
-
+import androidx.compose.animation.core.*
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.MaterialTheme
 import androidx.compose.material.Text
@@ -26,7 +27,9 @@ data class AccountData(
     val name: String,
     val balance: Double,
     val color: Color,
-    val isIncome: Boolean
+    val isIncome: Boolean,
+    val etablissement: String = "",
+    val type: String = ""
 )
 
 fun List<AccountData>.sumOfBalances(): Double {
@@ -36,6 +39,7 @@ fun List<AccountData>.sumOfBalances(): Double {
     }
     return sum
 }
+
 /**
  * Fonction pour convertir les données du repository en objets AccountData
  */
@@ -109,6 +113,7 @@ fun fetchComptesData(database: Database, userId: Int): List<AccountData> {
         return emptyList()
     }
 }
+
 /**
  * Composant principal qui affiche un graphique en arc représentant tous les comptes
  */
@@ -117,19 +122,22 @@ fun AccountsArcChart(
     accounts: List<AccountData>,
     onAccountClick: (AccountData) -> Unit = {}
 ) {
-    // Calcul du solde total
-    var totalBalance = 0.0
-    accounts.forEach { account ->
-        totalBalance += account.balance
-    }
+    // Calcul du solde total des comptes filtrés
+    val totalBalance = accounts.sumOfBalances()
+
+    // Animation du solde
+    val animatedBalance = animateFloatAsState(
+        targetValue = totalBalance.toFloat(),
+        animationSpec = tween(durationMillis = 750, easing = FastOutSlowInEasing)
+    )
 
     // Déterminer la couleur en fonction du solde
-    val arcColor = if (totalBalance >= 0) Color(0xFF1dbc7c) else Color(0xFFb61431)
-    val textColor = if (totalBalance >= 0) Color(0xFF1dbc7c) else Color(0xFFb61431)
+    val arcColor = if (animatedBalance.value >= 0) Color(0xFF1dbc7c) else Color(0xFFb61431)
+    val textColor = if (animatedBalance.value >= 0) Color(0xFF1dbc7c) else Color(0xFFb61431)
 
     // Formater le solde avec le symbole € et séparateur de milliers
     val formatter = NumberFormat.getCurrencyInstance(Locale.FRANCE)
-    val soldeFormate = formatter.format(totalBalance)
+    val soldeFormate = formatter.format(animatedBalance.value)
 
     // Affichage de l'arc avec le montant total
     Box(
@@ -137,6 +145,12 @@ fun AccountsArcChart(
         modifier = Modifier
             .size(250.dp)
             .padding(16.dp)
+            .clickable {
+                // Si un seul compte est filtré, on le sélectionne
+                if (accounts.size == 1) {
+                    onAccountClick(accounts[0])
+                }
+            }
     ) {
         Canvas(modifier = Modifier.fillMaxSize()) {
             val canvasWidth = size.width
@@ -156,20 +170,22 @@ fun AccountsArcChart(
                 style = Stroke(width = strokeWidth, cap = androidx.compose.ui.graphics.StrokeCap.Round)
             )
 
-            // Arc coloré représentant le solde
-            val referenceValue = 5000.0  // Valeur de référence pour l'angle maximum
-            val ratio = (totalBalance / referenceValue).coerceIn(-1.0, 1.0)  // Limiter entre -1 et 1
-            val sweepAngle = (ratio * 180).toFloat()  // Angle proportionnel au ratio
+            // Arc coloré représentant le solde (seulement s'il y a des comptes)
+            if (accounts.isNotEmpty()) {
+                val referenceValue = 5000.0  // Valeur de référence pour l'angle maximum
+                val ratio = (animatedBalance.value / referenceValue).coerceIn(-1.0, 1.0)  // Limiter entre -1 et 1
+                val sweepAngle = (ratio * 180).toFloat()  // Angle proportionnel au ratio
 
-            drawArc(
-                color = arcColor,
-                startAngle = -180f,
-                sweepAngle = sweepAngle,
-                useCenter = false,
-                topLeft = Offset(center.x - radius, center.y - radius),
-                size = androidx.compose.ui.geometry.Size(radius * 2, radius * 2),
-                style = Stroke(width = strokeWidth, cap = androidx.compose.ui.graphics.StrokeCap.Round)
-            )
+                drawArc(
+                    color = arcColor,
+                    startAngle = -180f,
+                    sweepAngle = sweepAngle,
+                    useCenter = false,
+                    topLeft = Offset(center.x - radius, center.y - radius),
+                    size = androidx.compose.ui.geometry.Size(radius * 2, radius * 2),
+                    style = Stroke(width = strokeWidth, cap = androidx.compose.ui.graphics.StrokeCap.Round)
+                )
+            }
         }
 
         // Texte au centre du cercle
@@ -182,11 +198,18 @@ fun AccountsArcChart(
                 color = textColor
             )
 
-            // Affichage du texte "Solde total"
+            // Affichage du texte "Solde total" ou "Solde filtré"
             Text(
-                text = "Solde total",
+                text = if (accounts.size == accounts.sumOfBalances().toInt()) "Solde total" else "Solde filtré",
                 fontSize = 16.sp,
                 color = MaterialTheme.colors.onSurface.copy(alpha = 0.7f)
+            )
+
+            // Afficher le nombre de comptes
+            Text(
+                text = "${accounts.size} compte(s)",
+                fontSize = 14.sp,
+                color = MaterialTheme.colors.onSurface.copy(alpha = 0.5f)
             )
         }
     }

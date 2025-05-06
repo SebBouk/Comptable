@@ -45,19 +45,88 @@ fun HomeScreen(database: Database, userId: Int, router: Router, userName: String
     var selectedCompteIndex by remember { mutableStateOf(-1) }
     var selectedCompte by remember { mutableStateOf<ComptesEntity?>(null) }
 
+    // Variables pour le filtrage
+    var searchQuery by remember { mutableStateOf("") }
+    var activeFilter by remember { mutableStateOf("") }
+
     val comptes = fetchComptes(database, userId)
     println("Compte in UserID: $comptes")
 
-    val accounts = org.example.comptable.ui.components.fetchComptesData(database, userId)
+    // Récupérer les données pour le tableau
+    val fullData = remember(refreshTrigger) { org.example.comptable.repositorie.fetchComptesData(database, userId) }
+    val originalRows = fullData.second
+
+    // Récupérer les données pour le graphique
+    val accounts = remember(refreshTrigger) {
+        org.example.comptable.ui.components.fetchComptesData(database, userId)
+    }
+
+    // Filtrer les lignes du tableau en fonction de la recherche et du filtre actif
+    val filteredRows = remember(searchQuery, activeFilter, originalRows) {
+        if (searchQuery.isEmpty() && activeFilter.isEmpty()) {
+            originalRows
+        } else {
+            originalRows.filter { row ->
+                // Logique de filtrage basée sur la recherche
+                val matchesSearch = if (searchQuery.isEmpty()) {
+                    true // Pas de filtre de recherche
+                } else {
+                    // Chercher dans toutes les colonnes
+                    row.any { cell ->
+                        cell?.contains(searchQuery, ignoreCase = true) == true
+                    }
+                }
+
+                // Logique de filtrage basée sur le filtre actif
+                val matchesFilter = when (activeFilter) {
+                    "Numéro" -> row[1]?.contains(searchQuery, ignoreCase = true) == true
+                    "Établissement" -> row[2]?.contains(searchQuery, ignoreCase = true) == true
+                    "Type" -> row[4]?.contains(searchQuery, ignoreCase = true) == true
+                    "Solde positif" -> {
+                        val soldeStr = row[3] ?: "0,00 €"
+                        !soldeStr.contains("-") // Solde positif
+                    }
+                    "Solde négatif" -> {
+                        val soldeStr = row[3] ?: "0,00 €"
+                        soldeStr.contains("-") // Solde négatif
+                    }
+                    else -> true // Pas de filtre spécifique
+                }
+
+                matchesSearch && matchesFilter
+            }
+        }
+    }
+
+    // Conserver les ID des comptes pour les actions, mais ne pas les afficher
+    val accountIds = filteredRows.map { it[0]?.toIntOrNull() ?: -1 }
+
+    // Colonnes visibles (sans l'ID)
+    val visibleColumns = listOf("Numéro de compte", "Établissement", "Solde", "Type")
+
+    // Créer des lignes sans la colonne ID
+    val visibleRows = filteredRows.map { row -> row.drop(1) }
+
+    // Filtrer les comptes pour le graphique en utilisant les mêmes critères
+    val filteredAccounts = remember(searchQuery, activeFilter, accounts, filteredRows) {
+        if (searchQuery.isEmpty() && activeFilter.isEmpty()) {
+            accounts
+        } else {
+            // Récupérer les IDs des comptes filtrés dans le tableau
+            val filteredIds = accountIds.toSet()
+
+            // Filtrer les comptes du graphique en utilisant les ID des lignes filtrées
+            accounts.filter { account ->
+                account.id in filteredIds
+            }
+        }
+    }
 
     val selectedAccount = remember { mutableStateOf<AccountData?>(null) }
-
-
 
     Box(
         modifier = Modifier.fillMaxSize(),
         contentAlignment = Alignment.Center,
-
     ) {
         Column(
             horizontalAlignment = Alignment.CenterHorizontally
@@ -76,17 +145,17 @@ fun HomeScreen(database: Database, userId: Int, router: Router, userName: String
                 modifier = Modifier.padding(bottom = 16.dp)
             )
             if (selectedAccount.value == null) {
-                // Affichage de tous les comptes avec sélecteur de mois
+                // Utiliser les comptes filtrés pour le graphique
                 AccountsArcChart(
-                    accounts = accounts,
+                    accounts = filteredAccounts,
                     onAccountClick = { account -> selectedAccount.value = account },
                 )
             }
             Card(
                 modifier = Modifier
-                    .padding(16.dp)
-                    .fillMaxWidth(0.8f)
-                    .fillMaxHeight(0.8f)
+                    .padding(2.dp)
+                    .fillMaxWidth(0.9f)
+                    .fillMaxHeight(0.9f)
                     .background(Color(0xFFF5F5DC))
             ) {
                 Box(
@@ -95,47 +164,120 @@ fun HomeScreen(database: Database, userId: Int, router: Router, userName: String
                         .padding(16.dp)
                         .weight(1f)
                 ) {
-                    ComptesTable(
-                        database = database,
-                        userId = userId,
-                        refreshKey = refreshTrigger,
-                        onNavigateToCompte = { accountId ->
-                            println("Navigating to account ID (from HomeScreen): $accountId")
-                            router.accountId = accountId
-                            router.navigateTo(Routes.COMPTE)
-                            onNavigate(Routes.COMPTE, accountId)
-                        },
-                        onEditCompte = { compteId ->
-                            // Recherche du compte par ID au lieu de l'index
-                            val compte = comptes.find { it.IdCompte == compteId }
-                            if (compte != null) {
-                                selectedCompte = compte
-                                showEditCompteDialog = true
-                            } else {
-                                println("Compte avec ID $compteId non trouvé")
+                    Column(modifier = Modifier.fillMaxWidth()) {
+                        // Ajouter la barre de recherche
+                        SearchBar(
+                            onSearch = { query ->
+                                searchQuery = query
+                            },
+                            onFilterChange = { filter ->
+                                activeFilter = filter
+                            },
+                            placeholder = "Rechercher un compte...",
+                            filters = listOf("Numéro", "Établissement", "Type", "Solde positif", "Solde négatif"),
+                            modifier = Modifier.fillMaxWidth()
+                        )
+
+                        // Afficher les résultats ou un message si aucun résultat
+                        if (visibleRows.isEmpty()) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(16.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = "Aucun compte ne correspond à votre recherche",
+                                    style = MaterialTheme.typography.body1,
+                                    color = Color.Gray
+                                )
                             }
-                        },
-                        onDeleteCompte = { compteId ->
-                            // Même approche pour la suppression
-                            val compte = comptes.find { it.IdCompte == compteId }
-                            if (compte != null) {
-                                selectedCompte = compte
-                                showDeleteConfirmationDialog = true
-                            } else {
-                                println("Compte avec ID $compteId non trouvé")
-                            }
-                        },
-                        onSoldeClick = { compteId ->
-                            // Trouver le compte dans la liste des comptes graphiques
-                            val accountData = accounts.find { it.id == compteId }
-                            if (accountData != null) {
-                                // Sélectionner ce compte pour afficher son graphique
-                                selectedAccount.value = accountData
-                            } else {
-                                println("Compte graphique avec ID $compteId non trouvé")
-                            }
+                        } else {
+                            DynamicTable(
+                                columns = visibleColumns,
+                                rows = visibleRows,
+                                sortableColumns = setOf(0, 1, 2, 3),
+                                isRowClickable = { rowIndex -> true },
+                                onRowClick = { rowIndex ->
+                                    val accountId = accountIds[rowIndex]
+                                    if (accountId != -1) {
+                                        println("Ligne $rowIndex cliquée, accountId: $accountId")
+                                        router.accountId = accountId
+                                        router.navigateTo(Routes.COMPTE)
+                                        onNavigate(Routes.COMPTE, accountId)
+                                    } else {
+                                        println("Erreur: ID de compte non trouvé")
+                                    }
+                                },
+                                onCellClick = { rowIndex, colIndex ->
+                                    val accountId = accountIds[rowIndex]
+                                    if (accountId != -1) {
+                                        if (colIndex == 0) {
+                                            println("Navigating to account ID: $accountId")
+                                            router.accountId = accountId
+                                            router.navigateTo(Routes.COMPTE)
+                                            onNavigate(Routes.COMPTE, accountId)
+                                        } else if (colIndex == 2) {
+                                            println("Showing chart for account ID: $accountId")
+                                            val accountData = accounts.find { it.id == accountId }
+                                            if (accountData != null) {
+                                                selectedAccount.value = accountData
+                                            } else {
+                                                println("Compte graphique avec ID $accountId non trouvé")
+                                            }
+                                        }
+                                    } else {
+                                        println("Failed to retrieve account ID")
+                                    }
+                                },
+                                columnWidths = listOf(0.3f, 0.25f, 0.25f, 0.2f),
+                                customCellAlignment = { colIndex ->
+                                    when (colIndex) {
+                                        0 -> Alignment.Center
+                                        else -> Alignment.CenterStart
+                                    }
+                                },
+                                customCellColorsByValue = { value, colIndex ->
+                                    when (colIndex) {
+                                        2 -> {
+                                            if (value.contains("-")) {
+                                                Color(0xFFb61431) // Rouge pour solde négatif
+                                            } else {
+                                                Color(0xFF1dbc7c) // Vert pour solde positif ou nul
+                                            }
+                                        }
+                                        else -> null
+                                    }
+                                },
+                                showEditDeleteActions = true,
+                                onEditRow = { rowIndex ->
+                                    val accountId = accountIds[rowIndex]
+                                    if (accountId != -1) {
+                                        val compte = comptes.find { it.IdCompte == accountId }
+                                        if (compte != null) {
+                                            selectedCompte = compte
+                                            showEditCompteDialog = true
+                                        } else {
+                                            println("Compte avec ID $accountId non trouvé")
+                                        }
+                                    }
+                                },
+                                onDeleteRow = { rowIndex ->
+                                    val accountId = accountIds[rowIndex]
+                                    if (accountId != -1) {
+                                        val compte = comptes.find { it.IdCompte == accountId }
+                                        if (compte != null) {
+                                            selectedCompte = compte
+                                            showDeleteConfirmationDialog = true
+                                        } else {
+                                            println("Compte avec ID $accountId non trouvé")
+                                        }
+                                    }
+                                }
+                            )
                         }
-                    )
+                    }
+
                     Button(
                         onClick = { showForm = true },
                         modifier = Modifier.padding(bottom = 16.dp).align(Alignment.BottomEnd),
@@ -146,9 +288,6 @@ fun HomeScreen(database: Database, userId: Int, router: Router, userName: String
                     ) {
                         Text("Créer un Nouveau Compte")
                     }
-
-                    // Bouton pour afficher le formulaire de création de compte
-
 
                     // Formulaire de création de compte
                     if (showForm) {
@@ -234,6 +373,7 @@ fun HomeScreen(database: Database, userId: Int, router: Router, userName: String
         }
     }
 }
+
 
 @Composable
 fun CreateCompteForm(

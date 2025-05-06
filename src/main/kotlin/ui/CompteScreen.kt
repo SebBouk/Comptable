@@ -1,7 +1,6 @@
 package org.example.comptable.ui
 
 
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.*
@@ -11,23 +10,18 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import org.example.comptable.repositorie.fetchOperationsForAccount
 import org.ktorm.database.Database
-import org.example.comptable.repositorie.AddOperationDialog
-import java.time.format.DateTimeFormatter
 import org.example.comptable.repositorie.*
+import org.example.comptable.ui.components.AnimatedChartOperations
+import org.example.comptable.ui.components.SearchBar
 import java.math.BigDecimal
-import java.text.NumberFormat
 import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.LocalTime
-import java.util.*
+import java.time.format.DateTimeFormatter
 
 
 @Composable
@@ -44,6 +38,7 @@ fun CompteScreen(database: Database, accountId: Int) {
     var selectedOperationIndex by remember { mutableStateOf(-1) }
     var selectedOperation by remember { mutableStateOf<org.example.comptable.repositorie.OperationEntity?>(null) }
 
+    val numeroCompte = getNumeroCompte(database, accountId)
     // Récupérer les opérations du compte
     val operations = fetchOperationsForAccount(database, accountId)
     println("Operations in CompteScreen: $operations")
@@ -61,6 +56,58 @@ fun CompteScreen(database: Database, accountId: Int) {
         }
     }
 
+    var searchQuery by remember { mutableStateOf("") }
+    var activeFilter by remember { mutableStateOf("") }
+
+    // Création des colonnes pour le tableau dynamique
+    val columns = listOf("Date", "Montant", "Type", "Categorie", "Description")
+
+    // Création des lignes originales pour le tableau dynamique
+    val originalRows = operations.map { operation ->
+        val operationType = if (operation.NatureOperation) "Entrée" else "Sortie"
+        val montantFormatted = String.format("%.2f €", operation.PrixOperation)
+        val dateFormatted = operation.DateOperation.format(DateTimeFormatter.ofPattern("dd/MM/yyyy HH:mm"))
+        val categorieName = categoriesMap[operation.IdCategorie] ?: "Non définie"
+
+        listOf(
+            operation.DateOperation.toString(),
+            montantFormatted,
+            operationType,
+            categorieName,
+            operation.CommentaireOperation ?: ""
+        )
+    }
+
+    // Filtrage des lignes en fonction de la recherche et du filtre actif
+    val filteredRows = remember(searchQuery, activeFilter, originalRows) {
+        if (searchQuery.isEmpty() && activeFilter.isEmpty()) {
+            originalRows
+        } else {
+            originalRows.filter { row ->
+                // Logique de filtrage basée sur la recherche
+                val matchesSearch = if (searchQuery.isEmpty()) {
+                    true // Pas de filtre de recherche
+                } else {
+                    // Chercher dans toutes les colonnes
+                    row.any { cell ->
+                        cell?.contains(searchQuery, ignoreCase = true) == true
+                    }
+                }
+
+                // Logique de filtrage basée sur le filtre actif
+                val matchesFilter = when (activeFilter) {
+                    "Date" -> row[0]?.contains(searchQuery, ignoreCase = true) == true
+                    "Montant" -> row[1]?.contains(searchQuery, ignoreCase = true) == true
+                    "Type" -> row[2]?.contains(searchQuery, ignoreCase = true) == true
+                    "Categorie" -> row[3]?.contains(searchQuery, ignoreCase = true) == true
+                    "Description" -> row[4]?.contains(searchQuery, ignoreCase = true) == true
+                    else -> true // Pas de filtre spécifique
+                }
+
+                matchesSearch && matchesFilter
+            }
+        }
+    }
 
     val dateTimeFormatter = DateTimeFormatter.ofPattern("dd/MM/yyyy HH:mm")
 
@@ -71,160 +118,137 @@ fun CompteScreen(database: Database, accountId: Int) {
         Card(
             modifier = Modifier
                 .padding(16.dp)
-                .fillMaxWidth(0.8f)
-                .fillMaxHeight(0.8f)
+                .fillMaxWidth(0.9f)
+                .fillMaxHeight(0.9f)
                 .background(Color(0xFFF5F5DC))
         ) {
             Column(
-                modifier = Modifier.background(Color(0xFFf7f7e1)).padding(16.dp),
+                modifier = Modifier.background(Color(0xFFf7f7e1)).padding(8.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
                 Text(
-                    text = "Opérations du Compte",
+                    text = "Opérations du Compte $numeroCompte",
                     style = MaterialTheme.typography.h5,
                     modifier = Modifier.padding(bottom = 8.dp)
                 )
+
+                // Box contenant le graphique animé
                 Box(
                     contentAlignment = Alignment.Center,
                     modifier = Modifier
                         .size(200.dp)
                         .padding(8.dp)
                 ) {
-                    // Définir la couleur en fonction du solde
-                    val circleColor = if (solde >= 0) Color(0xFF1dbc7c) else Color(0xFFb61431)
-                    val textColor = if (solde >= 0) Color(0xFF1dbc7c) else Color(0xFFb61431)
-
-                    // Formatage du solde
-                    val formatter = NumberFormat.getCurrencyInstance(Locale.FRANCE)
-                    val soldeFormate = formatter.format(solde)
-
-                    // Récupérer les informations du compte
-                    val compte = org.example.comptable.ui.components.fetchComptesData(database, accountId)
-
-                    Canvas(modifier = Modifier.fillMaxSize()) {
-                        val canvasWidth = size.width
-                        val canvasHeight = size.height
-                        val radius = minOf(canvasWidth, canvasHeight) / 2 * 1f
-                        val center = Offset(canvasWidth / 2, canvasHeight / 2)
-                        val strokeWidth = 30f
-
-                        // Dessin d'un arc au lieu d'un cercle complet
-                        // L'arc commence à -150 degrés et couvre 300 degrés
-                        drawArc(
-                            color = Color.LightGray.copy(alpha = 0.2f),
-                            startAngle = -180f,
-                            sweepAngle = 180f,
-                            useCenter = false,
-                            topLeft = Offset(center.x - radius, center.y - radius),
-                            size = androidx.compose.ui.geometry.Size(radius * 2, radius * 2),
-                            style = Stroke(width = strokeWidth, cap = androidx.compose.ui.graphics.StrokeCap.Round)
-                        )
-
-                        // Arc coloré qui représente le solde
-                        // Utilise un angle proportionnel au solde par rapport à une valeur de référence (par exemple, 5000€)
-                        // Pour un solde négatif, l'angle est négatif, sinon positif
-                        val referenceValue = 5000.0  // Valeur de référence pour l'angle maximum
-                        val ratio = (solde / referenceValue).coerceIn(-1.0, 1.0)  // Limiter entre -1 et 1
-                        val sweepAngle = (ratio * 180).toFloat()  // Angle proportionnel au ratio
-
-                        drawArc(
-                            color = circleColor,
-                            startAngle = -180f,
-                            sweepAngle = sweepAngle,
-                            useCenter = false,
-                            topLeft = Offset(center.x - radius, center.y - radius),
-                            size = androidx.compose.ui.geometry.Size(radius * 2, radius * 2),
-                            style = Stroke(width = strokeWidth, cap = androidx.compose.ui.graphics.StrokeCap.Round)
-                        )
-                    }
-
-                    // Texte au centre de l'arc
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        // Affichage du numéro de compte
-
-                        // Affichage du solde
-                        Text(
-                            text = soldeFormate,
-                            fontSize = 24.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = textColor
-                        )
-
-                        // Affichage du texte "Solde"
-                        Text(
-                            text = "Solde",
-                            fontSize = 16.sp,
-                            color = MaterialTheme.colors.onSurface.copy(alpha = 0.7f)
-                        )
-                    }
-                }
-
-                // Création des colonnes et des lignes pour le tableau dynamique
-                val columns = listOf("Date", "Montant", "Type", "Categorie", "Description")
-                val rows = operations.map { operation ->
-                    val operationType = if (operation.NatureOperation) "Entrée" else "Sortie"
-                    val montantFormatted = String.format("%.2f €", operation.PrixOperation)
-                    val dateFormatted = operation.DateOperation.format(dateTimeFormatter)
-                    val categorieName = categoriesMap[operation.IdCategorie] ?: "Non définie"
-
-                    listOf(
-                        operation.DateOperation.toString(),
-                        montantFormatted,
-                        operationType,
-                        categorieName,
-                        operation.CommentaireOperation ?: ""
+                    AnimatedChartOperations(
+                        data = operations,
+                        filteredRows =filteredRows,
+                        categoriesMap = categoriesMap,
+                        activeFilter = activeFilter,
+                        searchQuery = searchQuery
                     )
                 }
 
-                // Utilisation du composant DynamicTable
-                if (rows.isNotEmpty()) {
-                    DynamicTable(
-                        columns = columns,
-                        rows = rows,
-                        sortableColumns = setOf(0,1,2,3),
-                        dateColumns = setOf(0),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .weight(1f),
-                        columnWidths = listOf(0.2f, 0.15f, 0.15f,0.15f, 0.25f, 0.1f),
-                        customCellAlignment = { colIndex ->
-                            when (colIndex) {
-                                0 -> Alignment.Center // Date
-                                1 -> Alignment.Center // Montant
-                                2 -> Alignment.Center // Type
-                                3 -> Alignment.Center //Categorie
-                                else -> Alignment.CenterStart // Description
-                            }
-                        },
-                        customCellColorsByValue = { value, colIndex ->
-                            when (colIndex) {
-                                2 -> { // Colonne "Type"
-                                    when (value) {
-                                        "Entrée" -> Color(0xFF1dbc7c)
-                                        "Sortie" -> Color(0xFFb61431)
-                                        else -> null
-                                    }
-                                }
-                                1 -> { // Colonne "Montant"
-                                    // On ne connaît pas le type ici, donc on doit passer par un autre moyen
-                                    null // À compléter
-                                }
-                                else -> null
-                            }
-                        },
-                        alternateRowColors = true,
-                        showEditDeleteActions = true,
-                        onEditRow = { rowIndex ->
-                            selectedOperationIndex = rowIndex
-                            selectedOperation = operations[rowIndex]
-                            showEditOperationDialog = true
-                        },
-                        onDeleteRow = { rowIndex ->
-                            selectedOperationIndex = rowIndex
-                            selectedOperation = operations[rowIndex]
-                            showDeleteConfirmationDialog = true
+                // Barre de recherche pour les opérations
+                SearchBar(
+                    onSearch = { query ->
+                        searchQuery = query
+                    },
+                    onFilterChange = { filter ->
+                        activeFilter = filter
+                    },
+                    placeholder = "Rechercher une opération...",
+                    filters = listOf("Date", "Montant", "Type", "Categorie", "Description"),
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                // Tableau des opérations
+                if (operations.isNotEmpty()) {
+                    if (filteredRows.isEmpty()) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(16.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = "Aucune opération ne correspond à votre recherche",
+                                style = MaterialTheme.typography.body1,
+                                color = Color.Gray
+                            )
                         }
-                    )
+                    } else {
+                        DynamicTable(
+                            columns = columns,
+                            rows = filteredRows,
+                            sortableColumns = setOf(0, 1, 2, 3),
+                            dateColumns = setOf(0),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .weight(1f),
+                            columnWidths = listOf(0.2f, 0.15f, 0.15f, 0.15f, 0.25f, 0.1f),
+                            customCellAlignment = { colIndex ->
+                                when (colIndex) {
+                                    0 -> Alignment.Center // Date
+                                    1 -> Alignment.Center // Montant
+                                    2 -> Alignment.Center // Type
+                                    3 -> Alignment.Center // Categorie
+                                    else -> Alignment.CenterStart // Description
+                                }
+                            },
+                            customCellColorsByValue = { value, colIndex ->
+                                when (colIndex) {
+                                    2 -> { // Colonne "Type"
+                                        when (value) {
+                                            "Entrée" -> Color(0xFF1dbc7c)
+                                            "Sortie" -> Color(0xFFb61431)
+                                            else -> null
+                                        }
+                                    }
+                                    else -> null
+                                }
+                            },
+                            alternateRowColors = true,
+                            showEditDeleteActions = true,
+                            onEditRow = { rowIndex ->
+                                // Trouver l'index dans les opérations originales
+                                val operationIndex = operations.indexOfFirst { operation ->
+                                    val operationType = if (operation.NatureOperation) "Entrée" else "Sortie"
+                                    val dateStr = operation.DateOperation.toString()
+                                    val commentaire = operation.CommentaireOperation ?: ""
+                                    val categorieName = categoriesMap[operation.IdCategorie] ?: "Non définie"
+
+                                    filteredRows[rowIndex][0] == dateStr &&
+                                            filteredRows[rowIndex][2] == operationType &&
+                                            filteredRows[rowIndex][3] == categorieName &&
+                                            filteredRows[rowIndex][4] == commentaire
+                                }
+                                if (operationIndex != -1) {
+                                    selectedOperationIndex = operationIndex
+                                    selectedOperation = operations[operationIndex]
+                                    showEditOperationDialog = true
+                                }
+                            },
+                            onDeleteRow = { rowIndex ->
+                                // Trouver l'index dans les opérations originales
+                                val operationIndex = operations.indexOfFirst { operation ->
+                                    val operationType = if (operation.NatureOperation) "Entrée" else "Sortie"
+                                    val dateStr = operation.DateOperation.toString()
+                                    val commentaire = operation.CommentaireOperation ?: ""
+                                    val categorieName = categoriesMap[operation.IdCategorie] ?: "Non définie"
+
+                                    filteredRows[rowIndex][0] == dateStr &&
+                                            filteredRows[rowIndex][2] == operationType &&
+                                            filteredRows[rowIndex][3] == categorieName &&
+                                            filteredRows[rowIndex][4] == commentaire
+                                }
+                                if (operationIndex != -1) {
+                                    selectedOperationIndex = operationIndex
+                                    selectedOperation = operations[operationIndex]
+                                    showDeleteConfirmationDialog = true
+                                }
+                            }
+                        )
+                    }
                 } else {
                     Box(
                         modifier = Modifier
@@ -240,11 +264,10 @@ fun CompteScreen(database: Database, accountId: Int) {
                 Button(
                     onClick = { showAddOperationDialog = true },
                     modifier = Modifier
-                        .padding(top = 16.dp)
-                        .align(Alignment.End),
+                        .padding(top = 16.dp),
                     colors = ButtonDefaults.buttonColors(
-                        backgroundColor = Color(0xFF1dbc7c), // Couleur de fond du bouton
-                        contentColor = Color(0xfff5f5dc)         // Couleur du texte (et icône)
+                        backgroundColor = Color(0xFF1dbc7c),
+                        contentColor = Color(0xfff5f5dc)
                     )
                 ) {
                     Text("Ajouter une opération")
@@ -252,18 +275,20 @@ fun CompteScreen(database: Database, accountId: Int) {
             }
         }
 
-        // Afficher le dialogue d'ajout d'opération si demandé
+        // Dialogue d'ajout d'opération
         if (showAddOperationDialog) {
             AddOperationDialog(
                 database = database,
                 accountId = accountId,
                 onDismiss = { showAddOperationDialog = false },
                 onOperationAdded = {
-                    // Incrémenter le trigger pour forcer une actualisation
                     refreshTrigger++
+                    showAddOperationDialog = false
                 }
             )
         }
+
+        // Dialogue d'édition d'opération
         if (showEditOperationDialog && selectedOperation != null) {
             EditOperationDialog(
                 database = database,
@@ -296,11 +321,13 @@ fun CompteScreen(database: Database, accountId: Int) {
                     }
                 },
                 dismissButton = {
-                    OutlinedButton(onClick = { showDeleteConfirmationDialog = false },
+                    OutlinedButton(
+                        onClick = { showDeleteConfirmationDialog = false },
                         colors = ButtonDefaults.buttonColors(
-                            backgroundColor = Color(0xFF1dbc7c), // Couleur de fond du bouton
-                            contentColor = Color(0xfff5f5dc)         // Couleur du texte (et icône)
-                        )) {
+                            backgroundColor = Color(0xFF1dbc7c),
+                            contentColor = Color(0xfff5f5dc)
+                        )
+                    ) {
                         Text("Annuler")
                     }
                 }
@@ -361,16 +388,19 @@ fun EditOperationDialog(
                         .padding(vertical = 8.dp),
                     colors = TextFieldDefaults.outlinedTextFieldColors(
                         focusedBorderColor = Color(0xFF1dbc7c),
-                        focusedLabelColor = Color(0xff1dbc7c))
+                        focusedLabelColor = Color(0xff1dbc7c)
+                    )
                 )
+
+                // Sélection de la date
                 OutlinedButton(
                     onClick = { showDatePicker = true },
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(vertical = 8.dp),
                     colors = ButtonDefaults.buttonColors(
-                        backgroundColor = Color(0xFF1dbc7c), // Couleur de fond du bouton
-                        contentColor = Color(0xfff5f5dc)         // Couleur du texte (et icône)
+                        backgroundColor = Color(0xFF1dbc7c),
+                        contentColor = Color(0xfff5f5dc)
                     )
                 ) {
                     Row(
@@ -393,8 +423,8 @@ fun EditOperationDialog(
                         .fillMaxWidth()
                         .padding(vertical = 8.dp),
                     colors = ButtonDefaults.buttonColors(
-                        backgroundColor = Color(0xFF1dbc7c), // Couleur de fond du bouton
-                        contentColor = Color(0xfff5f5dc)         // Couleur du texte (et icône)
+                        backgroundColor = Color(0xFF1dbc7c),
+                        contentColor = Color(0xfff5f5dc)
                     )
                 ) {
                     Row(
@@ -404,11 +434,12 @@ fun EditOperationDialog(
                     ) {
                         Text("Heure: ${selectedTime.format(timeFormatter)}")
                         Icon(
-                            imageVector = Icons.Default.DateRange, // Utilisez une icône d'horloge si disponible
+                            imageVector = Icons.Default.DateRange,
                             contentDescription = "Sélectionner une heure"
                         )
                     }
                 }
+
                 // Type d'opération (entrée/sortie)
                 Row(
                     modifier = Modifier
@@ -443,8 +474,8 @@ fun EditOperationDialog(
                     onClick = { expandedCategorie = true },
                     modifier = Modifier.fillMaxWidth(),
                     colors = ButtonDefaults.buttonColors(
-                        backgroundColor = Color(0xFF1dbc7c), // Couleur de fond du bouton
-                        contentColor = Color(0xfff5f5dc)         // Couleur du texte (et icône)
+                        backgroundColor = Color(0xFF1dbc7c),
+                        contentColor = Color(0xfff5f5dc)
                     )
                 ) {
                     Text(
@@ -455,7 +486,7 @@ fun EditOperationDialog(
                 DropdownMenu(
                     expanded = expandedCategorie,
                     onDismissRequest = { expandedCategorie = false },
-                    modifier = Modifier.fillMaxWidth().background( Color(0xFFfafaeb))
+                    modifier = Modifier.fillMaxWidth().background(Color(0xFFfafaeb))
                 ) {
                     categories.forEach { (id, name) ->
                         Row(
@@ -474,7 +505,6 @@ fun EditOperationDialog(
                             }
                             IconButton(
                                 onClick = {
-                                    // Afficher une confirmation avant de supprimer
                                     showDeleteCategorieDialog = true
                                     categorieToDeleteId = id
                                 },
@@ -512,7 +542,8 @@ fun EditOperationDialog(
                         .padding(vertical = 8.dp),
                     colors = TextFieldDefaults.outlinedTextFieldColors(
                         focusedBorderColor = Color(0xFF1dbc7c),
-                        focusedLabelColor = Color(0xff1dbc7c))
+                        focusedLabelColor = Color(0xff1dbc7c)
+                    )
                 )
             }
         },
@@ -532,23 +563,27 @@ fun EditOperationDialog(
                     }
                 },
                 colors = ButtonDefaults.buttonColors(
-                    backgroundColor = Color(0xFF1dbc7c), // Couleur de fond du bouton
-                    contentColor = Color(0xfff5f5dc)         // Couleur du texte (et icône)
+                    backgroundColor = Color(0xFF1dbc7c),
+                    contentColor = Color(0xfff5f5dc)
                 )
             ) {
                 Text("Enregistrer")
             }
         },
         dismissButton = {
-            Button(onClick = onDismiss,
+            Button(
+                onClick = onDismiss,
                 colors = ButtonDefaults.buttonColors(
-                    backgroundColor = Color(0xFFb61431), // Couleur de fond du bouton
-                    contentColor = Color(0xfff5f5dc)         // Couleur du texte (et icône)
-                )) {
+                    backgroundColor = Color(0xFFb61431),
+                    contentColor = Color(0xfff5f5dc)
+                )
+            ) {
                 Text("Annuler")
             }
         }
     )
+
+    // Dialogue d'ajout de catégorie
     if (showAddCategorieDialog) {
         AlertDialog(
             onDismissRequest = { showAddCategorieDialog = false },
@@ -562,7 +597,8 @@ fun EditOperationDialog(
                     colors = TextFieldDefaults.outlinedTextFieldColors(
                         focusedBorderColor = Color(0xFF1dbc7c),
                         focusedLabelColor = Color(0xff1dbc7c),
-                        cursorColor = Color(0xff1dbc7c) ),
+                        cursorColor = Color(0xff1dbc7c)
+                    ),
                     modifier = Modifier.fillMaxWidth()
                 )
             },
@@ -570,35 +606,35 @@ fun EditOperationDialog(
                 Button(
                     onClick = {
                         if (newCategorieName.isNotBlank()) {
-                            // Ajouter la nouvelle catégorie à la base de données
                             val newId = addCategorie(database, newCategorieName)
-                            // Sélectionner la nouvelle catégorie
                             selectedCategorieId = newId
                             refreshTrigger++
-                            // Réinitialiser et fermer le dialogue
                             newCategorieName = ""
                             showAddCategorieDialog = false
                         }
                     },
                     colors = ButtonDefaults.buttonColors(
-                        backgroundColor = Color(0xFF1dbc7c), // Couleur de fond du bouton
-                        contentColor = Color(0xfff5f5dc)         // Couleur du texte (et icône)
+                        backgroundColor = Color(0xFF1dbc7c),
+                        contentColor = Color(0xfff5f5dc)
                     )
                 ) {
                     Text("Ajouter")
                 }
             },
             dismissButton = {
-                Button(onClick = { showAddCategorieDialog = false },
+                Button(
+                    onClick = { showAddCategorieDialog = false },
                     colors = ButtonDefaults.buttonColors(
-                        backgroundColor = Color(0xFFb61431), // Couleur de fond du bouton
-                        contentColor = Color(0xfff5f5dc)         // Couleur du texte (et icône)
-                    )) {
+                        backgroundColor = Color(0xFFb61431),
+                        contentColor = Color(0xfff5f5dc)
+                    )
+                ) {
                     Text("Annuler")
                 }
             }
         )
     }
+
     // Dialogue pour sélectionner la date
     if (showDatePicker) {
         DatePickerDialog(
@@ -622,6 +658,8 @@ fun EditOperationDialog(
             initialTime = selectedTime
         )
     }
+
+    // Dialogue de confirmation de suppression de catégorie
     if (showDeleteCategorieDialog && categorieToDeleteId != null) {
         AlertDialog(
             onDismissRequest = {
@@ -641,37 +679,33 @@ fun EditOperationDialog(
                     onClick = {
                         val result = deleteCategorie(database, categorieToDeleteId!!)
                         if (result) {
-                            // Suppression réussie
                             refreshTrigger++
-                        } else {
-                            // Afficher un message d'erreur (idéalement avec un Snackbar)
-                            // Vous pouvez ajouter un état pour gérer ces messages
                         }
                         showDeleteCategorieDialog = false
                         categorieToDeleteId = null
                     },
                     colors = ButtonDefaults.buttonColors(
-                        backgroundColor = Color(0xFFb61431), // Couleur de fond du bouton
-                        contentColor = Color(0xfff5f5dc)         // Couleur du texte (et icône)
+                        backgroundColor = Color(0xFFb61431),
+                        contentColor = Color(0xfff5f5dc)
                     )
                 ) {
                     Text("Supprimer", color = Color.White)
                 }
             },
             dismissButton = {
-                Button(onClick = {
-                    showDeleteCategorieDialog = false
-                    categorieToDeleteId = null
-                },
+                Button(
+                    onClick = {
+                        showDeleteCategorieDialog = false
+                        categorieToDeleteId = null
+                    },
                     colors = ButtonDefaults.buttonColors(
-                        backgroundColor = Color(0xFF1dbc7c), // Couleur de fond du bouton
-                        contentColor = Color(0xfff5f5dc)         // Couleur du texte (et icône)
-                    )) {
+                        backgroundColor = Color(0xFF1dbc7c),
+                        contentColor = Color(0xfff5f5dc)
+                    )
+                ) {
                     Text("Annuler")
                 }
             }
         )
     }
 }
-
-

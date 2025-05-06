@@ -50,6 +50,8 @@ fun DynamicTable(
     modifier: Modifier = Modifier,
     columnWidths: List<Float> = emptyList(),
     alternateRowColors: Boolean = true,
+    isRowClickable: (rowIndex: Int) -> Boolean = { false },
+    onRowClick: (rowIndex: Int) -> Unit = {},
     customCellAlignment: (colIndex: Int) -> Alignment = { Alignment.CenterStart },
     maxHeight: Int = Int.MAX_VALUE,
     headerBackgroundColor: Color = Color(0xff1bdc7c),
@@ -277,7 +279,14 @@ fun DynamicTable(
                             .fillMaxWidth()
                             .background(rowBackgroundColor(rowIndex))
                             .border(BorderStroke(1.dp, Color.Gray.copy(alpha = 0.5f)))
-                            .padding(8.dp),
+                            .padding(8.dp)
+                            .then(
+                                if (isRowClickable(rowIndex)) {
+                                    Modifier.clickable { onRowClick(rowIndex) }
+                                } else {
+                                    Modifier
+                                }
+                            ),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         row.forEachIndexed { colIndex, cell ->
